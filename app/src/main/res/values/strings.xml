@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">三星电池信息 / FCM 解锁</string>
+    <string name="xposed_description">显示更多电池信息 + 解除国行/港版 FCM 网络限制。派生自 SoClear/OneUIX，AGPL-3.0。</string>
+</resources>
