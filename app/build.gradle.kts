@@ -16,9 +16,11 @@ android {
         versionName = "1.0.0"
     }
 
+    // AGP 9 built-in Kotlin only supports JVM targets up to 24. Upstream pins KGP 2.4.21
+    // through extra Kotlin plugins; this minimal module needs none of them, so target 17.
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_25
-        targetCompatibility = JavaVersion.VERSION_25
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }
 
