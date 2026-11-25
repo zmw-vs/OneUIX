@@ -1,44 +1,53 @@
 # BatteryInfoLSP
 
-一个**无界面、常开**的 LSPosed 模块，从 [SoClear/OneUIX](https://github.com/SoClear/OneUIX)
-里提取的两个小功能，打成一个 APK：
-
-1. **显示更多电池信息** — 「设置 → 关于手机 → 电池信息」显示被隐藏的电池监管信息项。
-2. **解除 FCM 网络限制** — 去掉国行/港版固件对 GMS/FCM 推送的网络限制。
+一个**无界面、常开**的 LSPosed 模块，只做一件事：从 [SoClear/OneUIX](https://github.com/SoClear/OneUIX)
+里提取的「设置 → 关于手机 → 电池信息」显示被隐藏的电池监管信息项。
 
 ## 来源与许可
 
 - 派生自 [SoClear/OneUIX](https://github.com/SoClear/OneUIX)，快照 commit `93b2dbd` 中的
-  `showMoreBatteryInfo` 与 `liftFcmNetworkLimit` 两个功能。
+  `showMoreBatteryInfo` 功能。
 - 原作者：SoClear。原项目采用 **GNU AGPL-3.0**，本模块同样以 **AGPL-3.0** 发布，
   许可证全文见 `LICENSE.txt`。任何分发（包括二进制 APK）都必须附上源码与许可证，
   并保留上述来源说明。
 
 ## 实现原理
 
-| 功能 | 进程 | Hook 点 |
-|---|---|---|
-| 显示更多电池信息 | `com.android.settings` | `BatteryRegulatoryPreferenceController.getAvailabilityStatus()` 恒返回 `0`（AVAILABLE），时机为宿主 `Application.attach` 之后 |
-| 解除 FCM 网络限制 | `system`（system_server） | Hook `com.android.server.alarm.GmsAlarmManager` 的全部构造器，构造完成后把 `isChinaMode` / `isHongKongMode` 两个字段置 `false` |
-
-上游 FCM 那条依赖一个 429 行的通用反射门面 `Reflect.kt`，这里用 12 行原生反射
-（沿父类链找字段 + `setBoolean`）替代，行为等价。
+在 `com.android.settings` 进程里，等宿主 `Application.attach` 拿到 Context 后，
+把 `BatteryRegulatoryPreferenceController.getAvailabilityStatus()` 恒返回 `0`（AVAILABLE），
+三星藏起来的电池监管信息项就会显示出来。类或方法找不到时只写日志、不影响宿主。
 
 ## 相对上游砍掉了什么
 
 配置通道（`preference.json` / DataStore / libxposed service）、整个 Compose 设置界面、
-DexKit、NDK + CMake、`:stub` 模块、另外 40 多个 Hook、30 个作用域。
-最终只保留：1 个 Kotlin 入口文件 + 3 个 xposed 元数据 + 1 个 Manifest + 2 条字符串。
+DexKit、NDK + CMake、`:stub` 模块、另外 40 多个 Hook、其余 29 个作用域，
+以及 `liftFcmNetworkLimit`（FCM 解锁，本版本不含）。
+最终只保留：1 个 Java 入口文件 + 3 个 xposed 元数据 + 1 个 Manifest + 2 条字符串。
+
+## 为什么用 Java
+
+上游入口是 Kotlin。Kotlin 版构建出的 APK 有 **2.4 MB**，其中 `classes.dex` 独占
+2,405,280 字节（引用 3266 处 `Lkotlin/` 类）+ 8 个 `.kotlin_builtins` 元数据文件，
+而真正的 Hook 代码在 `classes3.dex` 里只有 8,676 字节 —— 99.6% 是 Kotlin 标准库。
+原因是 AGP 9 内置 Kotlin 会自动把 `kotlin-stdlib` 作为运行时依赖打进包，
+加上工程未开启混淆（为保证 `java_init.list` 入口类名有效），标准库一个不落全保留。
+
+本版把唯一入口改成 Java，并在 Gradle 里排除 `kotlin-stdlib`。
+`libxposed:api` 是 `compileOnly`，不进包，因此 APK 里没有任何第三方运行时库。
+
+> 工程**未开启混淆**，以保证 `java_init.list` 中的入口类名始终有效。
+> 若日后开启 R8/ProGuard，必须追加规则
+> `-adaptresourcefilecontents META-INF/xposed/java_init.list` 并 keep XposedModule 子类。
 
 ## 工程结构
 
 ```
-app/src/main/java/com/zmw/batteryinfo/BatteryInfoModule.kt   Hook 入口（两个回调）
+app/src/main/java/com/zmw/batteryinfo/BatteryInfoModule.java   Hook 入口（单回调，纯 Java）
 app/src/main/AndroidManifest.xml                             无 Activity 的 application 壳
 app/src/main/res/values/strings.xml                          模块名与描述
 app/src/main/resources/META-INF/xposed/java_init.list        入口类名
 app/src/main/resources/META-INF/xposed/module.prop           API 102 声明
-app/src/main/resources/META-INF/xposed/scope.list             system + com.android.settings
+app/src/main/resources/META-INF/xposed/scope.list             仅 com.android.settings
 .github/workflows/build.yml                                  一键出 APK
 ```
 
@@ -52,20 +61,21 @@ gradlew assembleDebug
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`。
 
+**已构建成品**：工作区根目录的 `BatteryInfoLSP-BatteryOnly-v1.0.0.apk`（debug 签名，v2/v3）。
 本机没有这套工具链时，把这个目录推到任意 GitHub 仓库即可由
 `.github/workflows/build.yml` 自动构建并在 Actions 产物里下载 APK。
+本次实际构建走的是 `zmw-vs/OneUIX` 的孤立分支 `batteryinfo-apk`（push 事件触发，
+未改动 main、未新建仓库）。
 
-> 工程**未开启混淆**，以保证 `java_init.list` 中的入口类名始终有效。
-> 若日后开启 R8/ProGuard，必须追加规则
-> `-adaptresourcefilecontents META-INF/xposed/java_init.list` 并 keep XposedModule 子类。
+> AGP 9 内置 Kotlin 的 KGP 只支持 JVM target ≤ 24，所以 `compileOptions` 固定用 17；
+> 上游靠额外 Kotlin 插件把 KGP 顶到 2.4.21 才能用 25，本模块不需要那套插件。
 
 ## 安装使用
 
 1. 设备需 Root + 已激活的 LSPosed（支持 libxposed API 102）。
 2. 安装 APK（无桌面图标，属正常现象）。
-3. 在 LSPosed 管理器启用本模块，作用域勾选 **「系统框架 / system」** 和
-   **「系统设置 / com.android.settings」**。
-4. **重启手机**（FCM 那条跑在 system_server，必须重启；电池那条重启设置 App 即可生效）。
+3. 在 LSPosed 管理器启用本模块，作用域勾选 **「系统设置 / com.android.settings」**。
+4. 重启设置 App（或直接重启手机）即可生效。
 
 ## 已知限制
 
